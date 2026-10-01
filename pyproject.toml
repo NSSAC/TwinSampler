@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "twin-sampler"
+version = "0.1.0"
+description = "Synthetic epidemic ascertainment: turn ABM output into realistic public health line lists"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+  "pandas>=1.4",
+  "numpy>=1.21",
+  "scipy>=1.8",
+  "networkx>=2.8",
+  "pyyaml>=6.0",
+  "matplotlib>=3.5",
+  "scikit-learn>=1.1",
+]
+
+[project.optional-dependencies]
+# pyarrow materially speeds up reading the EpiHiper output and the
+# persontrait files; DemographicsLoader requests it by default.
+fast = ["pyarrow>=10.0"]
+
+[project.urls]
+Homepage = "https://github.com/NSSAC/TwinSampler"
+
+[project.scripts]
+simulate-linelist = "linelist_generation.simulate_linelist:main"
+twinsampler-label-components = "linelist_generation.label_components:main"
+# Legacy name, kept so existing pipelines and the PhyloGAS Snakefile keep working.
+simulate_linelist = "linelist_generation.simulate_linelist:main"
+
+[tool.setuptools]
+package-dir = { "" = "scripts" }
+
+[tool.setuptools.packages.find]
+where = ["scripts"]
+include = ["linelist_generation*"]
