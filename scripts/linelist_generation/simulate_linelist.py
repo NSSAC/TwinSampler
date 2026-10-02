@@ -516,7 +516,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--stop_tick", type=int, default=None,
                        help="The simulation tick to stop processing at (inclusive). If not provided, processes all ticks.")
     p.add_argument("--schedule_input", type=str, default=None, help="Path to the importation schedule CSV file to enable variant labeling.")
-    p.add_argument("--variant_mode", type=str, choices=['variant_temporal', 'variant_bipartite', 'just_components'], default='variant_bipartite', help="Variant labeling mode: 'temporal' or 'bipartite'.")
+    p.add_argument("--variant_mode", type=str,
+                   choices=['variant_temporal', 'variant_bipartite', 'just_components'],
+                   default='just_components',
+                   help="Variant labelling mode. DEFAULT CHANGED to 'just_components': "
+                        "benchmark variant assignment moved to PhyloGAS "
+                        "(`phylogas assign-variants`), because those labels are ground "
+                        "truth matched against an importation schedule rather than an "
+                        "ascertainment artefact. TwinSampler still emits component_id. "
+                        "The old modes still work here if you need them standalone.")
     p.add_argument("--people", required=True, dest="persontrait_file", help="Path to va_persontrait_epihiper.txt.")
     p.add_argument("--households", required=True, help="Path to va_household.csv.")
     p.add_argument("--rucc", required=True, help="Path to Ruralurbancontinuumcodes2023.csv.")
@@ -594,6 +602,15 @@ def main():
 
 # --- Step 3: Apply Component/Variant Labeling and Alias Propagation ---
     # Validate arguments
+    if args.variant_mode in ('variant_temporal', 'variant_bipartite'):
+        print("\n  NOTE: --variant_mode " + args.variant_mode + " assigns benchmark variant")
+        print("        labels here. That step moved to PhyloGAS, which writes the column")
+        print("        'variant_benchmark' and keeps ground truth with the rest of the")
+        print("        benchmarking:")
+        print("          phylogas assign-variants --allevents <allevents.csv.xz> \\")
+        print("              --schedule <schedule.csv> --mode bipartite --out <out.csv.xz>")
+        print("        Use --variant_mode just_components (now the default) to skip this.\n")
+
     if args.variant_mode != 'just_components' and not args.schedule_input:
         print("Error: --schedule_input is required unless --variant_mode is 'just_components'.")
         sys.exit(1)
