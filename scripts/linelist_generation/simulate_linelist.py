@@ -248,8 +248,12 @@ def format_final_linelist(
     df['division'] = division
     df['divisionExposure'] = division # Assumed to be the same as division
 
-    # Construct the 'strain' ID, replicating the logic from genetic_painter.py
-    # Requires 'pid', 'tick', and 'date'
+    # Construct the Nextstrain 'strain' ID. This must match the FASTA headers
+    # genetic_painter.py writes, character for character, or ncov drops every
+    # sequence. The canonical definition is PhyloGAS's phylogas/ids.py; this
+    # copy is deliberate so TwinSampler runs without PhyloGAS installed, and
+    # test_strain_id_contract.py pins both to the same fixture table.
+    # Requires 'pid', 'exposure_tick' and 'exposure_date'.
     df['year'] = pd.to_datetime(df['date']).dt.year
     df['exposure_year'] = pd.to_datetime(df['exposure_date']).dt.year
 
@@ -537,6 +541,19 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--target_variant", type=str, default=None, 
                    help="Filter all simulation events to a specific variant number (e.g., '2').")
     p.add_argument("--exposed_filter", type=str, default='["E"]', help="A JSON-formatted string of exit_state prefixes to filter")
+    # Geography. These were hardcoded defaults on format_final_linelist, while
+    # genetic_painter.py takes the same four values from its --location JSON.
+    # The two had to agree because both build the Nextstrain `strain` id from
+    # them, and nothing enforced it: a non-Virginia run produced line list
+    # strains reading USA/VA-... against painter FASTA headers reading
+    # USA/WA-..., so no sequence matched its metadata. PhyloGAS passes these
+    # through from genetic_painter.location; the defaults preserve the old
+    # behaviour for standalone use.
+    p.add_argument("--country", default="USA", help="strain id country (default: USA)")
+    p.add_argument("--region", default="North America", help="metadata region")
+    p.add_argument("--division", default="Virginia", help="metadata division (state)")
+    p.add_argument("--division_abbr", "--divisionAbbr", dest="division_abbr",
+                   default="VA", help="strain id division abbreviation (default: VA)")
     p.add_argument("--test_alias_graph", action='store_true', default=False, help="If set, runs a unit test to validate that the alias_contact and alias_pid columns perfectly reconstruct the transmission graph.")
         
     return p.parse_args()
@@ -683,7 +700,11 @@ def main():
     
     if args.output_all_events:
         print("--- Processing and saving all potential events (pre-ascertainment simulation) ---")
-        formatted_events_df = format_final_linelist(preprocessed_events_df)
+        formatted_events_df = format_final_linelist(
+            preprocessed_events_df,
+            country=args.country, region=args.region,
+            division=args.division, divisionAbbr=args.division_abbr,
+        )
         all_events_path = f"{base_output_path}_allevents.csv.xz"
         formatted_events_df.to_csv(all_events_path, index=False, compression='xz')
         print(f"Wrote {len(formatted_events_df):,} potential event rows to {all_events_path}")
@@ -694,7 +715,11 @@ def main():
     for s in seeds:
         print(f"\n--- Running simulation for seed {s} ---")
         raw_linelist_df = simulate(preprocessed_events_df, params=params, seed=s)
-        final_linelist_df = format_final_linelist(raw_linelist_df)
+        final_linelist_df = format_final_linelist(
+            raw_linelist_df,
+            country=args.country, region=args.region,
+            division=args.division, divisionAbbr=args.division_abbr,
+        )
 
         if args.n_seeds > 1:
             out_path = args.out.replace(".csv", f"_seed{s}.csv.xz")
