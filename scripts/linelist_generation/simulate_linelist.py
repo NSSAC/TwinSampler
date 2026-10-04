@@ -659,6 +659,22 @@ def parse_args() -> argparse.Namespace:
 
 
 
+def _split_csv_suffix(path: str):
+    """Split a csv path into (root, pandas compression, full extension).
+
+    `linelist.csv.xz` -> ("linelist", "xz", ".csv.xz")
+    `linelist.csv`     -> ("linelist", None, ".csv")
+
+    Keeps a per-seed filename from turning into linelist.csv.xz_seed43 or
+    linelist_seed43.csv.xz.xz, which string-replacing ".csv" produced.
+    """
+    for ext, comp in ((".csv.xz", "xz"), (".csv.gz", "gzip"),
+                      (".csv.bz2", "bz2"), (".csv.zst", "zstd"), (".csv", None)):
+        if path.endswith(ext):
+            return path[: -len(ext)], comp, ext
+    return path, None, ""
+
+
 def main():
     args = parse_args()
 
@@ -793,7 +809,10 @@ def main():
     # ... (The rest of main() remains exactly the same, as it now receives a correctly
     #      filtered, decorated, and labeled `events_df`)
     
-    base_output_path = args.out.replace(".csv.gz", "").replace(".csv", "")
+    # Sibling artefacts hang off the stem. Stripping ".csv" by replacement
+    # turns linelist.csv.xz into "linelist.xz", giving
+    # linelist.xz_mugration.json.
+    base_output_path, _, _ = _split_csv_suffix(args.out)
     mugration_out_path = f"{base_output_path}_mugration.json"
     
     generate_mugration_json(events_df, mugration_out_path)
@@ -834,16 +853,17 @@ def main():
             division=args.division, divisionAbbr=args.division_abbr,
         )
 
+        # Honour --out as given. This used to append ".xz" to a path ending
+        # in ".csv", so `--out linelist.csv` wrote linelist.csv.xz and a
+        # caller that declared linelist.csv as its output saw it as missing.
+        # Compression now follows the extension the caller asked for.
+        out_path = args.out
         if args.n_seeds > 1:
-            out_path = args.out.replace(".csv", f"_seed{s}.csv.xz")
-        else:
-            out_path = args.out
-        if not out_path.endswith((".xz", ".csv")):
-            out_path = out_path + ".csv.xz"
-        elif out_path.endswith(".csv"):
-             out_path = out_path + ".xz"
+            root, _, ext = _split_csv_suffix(out_path)
+            out_path = f"{root}_seed{s}{ext}"
+        _, compression, _ = _split_csv_suffix(out_path)
 
-        final_linelist_df.to_csv(out_path, index=False, compression='xz')
+        final_linelist_df.to_csv(out_path, index=False, compression=compression)
         print(f"Wrote {len(final_linelist_df):,} rows to {out_path} for seed {s}")
 
 
