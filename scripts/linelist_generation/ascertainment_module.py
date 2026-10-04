@@ -10,13 +10,39 @@ def load_ascertainment_parameters(param_filepath: str) -> Dict[str, Any]:
     with open(param_filepath, 'r') as file:
         return yaml.safe_load(file)
 
+# EpiHiper state suffix -> the age band the ascertainment parameters are keyed
+# on. The authoritative meanings are the `ann:label` fields in the disease
+# model (cfg/exp1/disease.json):
+#
+#   _p  Susceptible preschool (0-4)        -> 0-17
+#   _s  Susceptible school-aged (5-17)     -> 0-17
+#   _a  Susceptible adult (18-49)          -> 18-49
+#   _o  Susceptible older adult (50-64)    -> 50-64
+#   _g  Susceptible golden-aged (65+)      -> 65+
+#
+# This previously read {'p': '0-17', 'a': '18-49', 'o': '50-64', 's': '65+'},
+# evidently from an older state diagram where `s` meant senior. The effect was
+# that school-aged children took the 65+ multiplier (2.15 instead of 0.60,
+# 3.6x too high) while actual over-65s fell through to the 18-49 default
+# (1.00 instead of 2.15, 2.15x too low) -- the two extreme age classes
+# swapped, in the two largest multipliers the model has.
+AGE_CODE_TO_BAND = {
+    'p': '0-17',
+    's': '0-17',
+    'a': '18-49',
+    'o': '50-64',
+    'g': '65+',
+}
+
+# Fallback when the state itself is missing. Only reachable for a row with no
+# exit_state, which also has no severity and so is not ascertained.
+_AGE_BAND_UNKNOWN = '18-49'
+
+
 def _map_abm_state_to_model_inputs(exit_state: str) -> tuple[str | None, str]:
-    """
-    Parses an agent's exit_state to determine symptom severity and age group.
-    (This function remains the same)
-    """
+    """Derive symptom severity and age band from an agent's exit_state."""
     if pd.isna(exit_state):
-        return None, '18-49' # Default for missing data
+        return None, _AGE_BAND_UNKNOWN
 
     parts = str(exit_state).split('_')
     state_prefix = parts[0]
@@ -27,13 +53,17 @@ def _map_abm_state_to_model_inputs(exit_state: str) -> tuple[str | None, str]:
         symptom_severity = 'asymptomatic'
     elif state_prefix.startswith('I'):
         symptom_severity = 'mild'
-    elif state_prefix.startswith(('H', 'hM', 'Vent', 'D', 'dM', 'dVent', 'dH')): # Added 'dm' for completeness
+    elif state_prefix.startswith(('H', 'hM', 'Vent', 'D', 'dM', 'dVent', 'dH')):
         symptom_severity = 'severe'
 
-    age_map = {'p': '0-17', 'a': '18-49', 'o': '50-64', 's': '65+'}
-    age_group = age_map.get(age_code, '18-49')
+    if age_code not in AGE_CODE_TO_BAND:
+        # Silently defaulting is how `g` came to be treated as 18-49.
+        raise ValueError(
+            f"exit_state {exit_state!r} has age code {age_code!r}, which is not "
+            f"in AGE_CODE_TO_BAND ({', '.join(sorted(AGE_CODE_TO_BAND))}). Add "
+            f"it, using the disease model's ann:label for that state.")
 
-    return symptom_severity, age_group
+    return symptom_severity, AGE_CODE_TO_BAND[age_code]
 
 def preprocess_for_ascertainment(df: pd.DataFrame) -> pd.DataFrame:
     """
