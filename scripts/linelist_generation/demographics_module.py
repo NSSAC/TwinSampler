@@ -49,8 +49,15 @@ class DemographicsLoader:
     """
     
     # The Single Source of Truth for column mappings
+    #
+    # admin2 is deliberately NOT mapped here. The VA persontrait file already
+    # has a `county` column holding names ("Accomack VA"), while the household
+    # file has admin1..admin4. Renaming household.admin2 -> county made both
+    # frames carry `county`, so the merge on hid produced county_x/county_y and
+    # left no `county` at all -- which is why the county lookup in
+    # process_epihiper has never worked on this input. county and county_fips
+    # are now resolved explicitly there instead.
     COLUMN_MAPPINGS = {
-        'admin2': 'county',
         'home_latitude': 'latitude',
         'home_longitude': 'longitude',
         'gender': 'sex'
@@ -67,9 +74,39 @@ class DemographicsLoader:
         else:
             self.fips_to_name_dict = None
 
+    @staticmethod
+    def _header_on_first_line(filepath) -> bool:
+        """True when line 1 is already the header, so nothing may be skipped.
+
+        Callers pass skiprows=1 for files that open with a banner line. The VA
+        persontrait file does not have one, and skipping its header is quietly
+        destructive in two different ways depending on the engine: the C
+        engine promotes the first data row to be the header, giving columns
+        like ['361190001', '1', 'Accomake VA', ...]; pandas' pyarrow engine
+        keeps the real header and drops the first *person* instead. The second
+        is worse because nothing fails -- the run completes one record short.
+        So detect rather than trust the flag.
+        """
+        import csv as _csv
+
+        try:
+            with open(filepath, "r", newline="") as fh:
+                first = fh.readline()
+        except (OSError, UnicodeDecodeError):
+            return False
+        if not first:
+            return False
+        fields = [f.strip().lower() for f in next(_csv.reader([first]), [])]
+        # A header names identifiers; a data row carries their values.
+        return bool({"pid", "hid", "admin1"} & set(fields))
+
     def _load_and_standardize(self, use_pyarrow, skiprows):
         """Loads the CSV and applies universal schema rules."""
         engine = "pyarrow" if use_pyarrow else "c"
+        if skiprows and self._header_on_first_line(self.filepath):
+            print(f"  (line 1 of {os.path.basename(self.filepath)} is already a "
+                  f"header; ignoring skiprows={skiprows})")
+            skiprows = 0
         try:
             df = pd.read_csv(self.filepath, engine=engine, skiprows=skiprows)
         except (ImportError, ValueError):

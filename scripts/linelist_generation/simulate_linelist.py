@@ -43,6 +43,97 @@ except ImportError as e:
     print("Variant labeling functionality will be disabled.")
     LABEL_COMPONENTS_AVAILABLE = False
 
+def _fips_part(series, width):
+    """One FIPS component as a zero-padded string, NaN-preserving.
+
+    Goes through numeric first because a left merge leaves these as floats
+    (51.0), and str(51.0).zfill(2) is "51.0".
+    """
+    num = pd.to_numeric(series, errors="coerce")
+    text = num.astype("Int64").astype(str).str.zfill(width)
+    return text.where(num.notna())
+
+
+def resolve_county(df, fips_to_name):
+    """Ensure `county` (a name) and `county_fips` (5 digits) both exist.
+
+    Three facts about the NSSAC synthetic population make this fiddlier than
+    a rename, which is what it used to be:
+
+    * The persontrait file already has `county` holding names ("Accomack VA").
+    * The household file has no county column at all. It has `admin1`, the
+      2-digit state FIPS, and `admin2`, the county's code *within* that state
+      -- 51 and 1 for Accomack. The 5-digit code is the two concatenated,
+      zero-padded separately. Zero-padding admin2 alone, as the old code did,
+      turns county 1 into "00001" and matches nothing.
+    * Mapping household.admin2 -> county in DemographicsLoader made both
+      frames carry `county`, so merging on hid produced county_x/county_y and
+      neither name survived.
+
+    So `county` is taken as given when the persontrait file supplies it, and
+    `county_fips` is composed from admin1/admin2, or reverse-mapped from the
+    county name when the admin columns are absent.
+    """
+    have = set(df.columns)
+
+    if "county_fips" not in have:
+        if {"admin1", "admin2"} <= have:
+            state = _fips_part(df["admin1"], 2)
+            county = _fips_part(df["admin2"], 3)
+            df["county_fips"] = (state + county).where(state.notna() & county.notna())
+            source = "admin1+admin2"
+        elif "county" in have:
+            # No admin columns: go the other way through the same table.
+            name_to_fips = {v: k for k, v in fips_to_name.items()}
+            df["county_fips"] = df["county"].map(name_to_fips)
+            source = "the county name, reverse-mapped"
+        else:
+            raise KeyError(
+                "cannot determine county_fips: no county_fips column, no "
+                "admin1/admin2 pair to compose it from, and no county name to "
+                "reverse-map. Columns present: " + ", ".join(map(str, df.columns)))
+    else:
+        df["county_fips"] = _fips_part(df["county_fips"], 5)
+        source = "the input's own county_fips"
+
+    n_fips = int(df["county_fips"].notna().sum())
+    if n_fips == 0:
+        raise ValueError(
+            "every county_fips came out empty. Check admin1/admin2 in the "
+            "household file, or the county names in the persontrait file.")
+
+    mapped = df["county_fips"].map(fips_to_name)
+    if "county" not in have:
+        df["county"] = mapped.fillna("Unknown")
+        n_named = int((df["county"] != "Unknown").sum())
+        if n_named == 0:
+            raise ValueError(
+                "no county_fips matched the FIPS table, so every county would "
+                f"be 'Unknown'. Got e.g. {df['county_fips'].dropna().head(3).tolist()}")
+    else:
+        # Both sources present: they must agree, or the hid merge is wrong.
+        both = df["county"].notna() & mapped.notna()
+        if source.startswith("the county name"):
+            # Reverse-mapped from this very column; agreement is tautological.
+            pass
+        elif both.any():
+            disagree = int((df.loc[both, "county"] != mapped[both]).sum())
+            if disagree:
+                sample = df.loc[both & (df["county"] != mapped), ["county", "county_fips"]].head(3)
+                print(f"  WARNING: {disagree:,} of {int(both.sum()):,} rows have a "
+                      f"county name that disagrees with {source}:\n"
+                      f"{sample.to_string(index=False)}")
+            else:
+                print(f"  county name and {source} agree on all "
+                      f"{int(both.sum()):,} checkable rows.")
+
+    unmapped = int(df["county_fips"].notna().sum() - mapped.notna().sum())
+    if unmapped:
+        print(f"  WARNING: {unmapped:,} rows have a county_fips absent from the "
+              f"FIPS table.")
+    return df
+
+
 def process_epihiper(
     events_df: pd.DataFrame, 
     persontrait_path: str,
@@ -124,20 +215,28 @@ def process_epihiper(
     decorated_df = events_df.merge(person_df, on='pid', how='left')
     decorated_df = decorated_df.merge(household_df, on='hid', how='left')
     
-    if "county_fips" in decorated_df.columns:
-        decorated_df["county_fips"] = decorated_df["county_fips"].astype(str).str.zfill(5)
-        rucc_df["FIPS"] = rucc_df["FIPS"].astype(str).str.zfill(5)
-        decorated_df = decorated_df.merge(
-            rucc_df[["FIPS", "rucc_code"]],
-            left_on="county_fips",
-            right_on="FIPS",
-            how="left",
-        ).drop(columns=['FIPS'], errors='ignore')
-    print("Successfully decorated data with person, household, and RUCC info.")
+    decorated_df = resolve_county(decorated_df, loader.fips_to_name_dict)
 
-    decorated_df['county'] = decorated_df["county_fips"].map(loader.fips_to_name_dict).fillna("Unknown")
+    rucc_df["FIPS"] = rucc_df["FIPS"].astype(str).str.zfill(5)
+    decorated_df = decorated_df.merge(
+        rucc_df[["FIPS", "rucc_code"]],
+        left_on="county_fips",
+        right_on="FIPS",
+        how="left",
+    ).drop(columns=['FIPS'], errors='ignore')
 
-    
+    n_rucc = int(decorated_df["rucc_code"].notna().sum())
+    print(f"Successfully decorated data with person, household, and RUCC info "
+          f"({n_rucc:,} of {len(decorated_df):,} rows matched a RUCC code).")
+    if n_rucc == 0:
+        raise ValueError(
+            "no row matched a RUCC code, so ascertainment_module would fall "
+            "back to its default location_type for the whole population. "
+            f"county_fips values look like "
+            f"{decorated_df['county_fips'].dropna().head(3).tolist()}; the "
+            "RUCC table's FIPS look like "
+            f"{rucc_df['FIPS'].head(3).tolist()}")
+
     # 4. Calculate the 'date' column
     base_date = pd.to_datetime(start_date)
     decorated_df['date'] = decorated_df['tick'].apply(
