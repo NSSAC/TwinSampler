@@ -54,6 +54,12 @@ fallback_version = "0.1.0.dev0+unknown"
 [tool.setuptools]
 package-dir = { "" = "scripts" }
 
+[tool.setuptools.package-data]
+# The county FIPS table must travel with the package. It used to sit at the
+# repo root in Data/, reachable only by climbing out of the package with
+# "../..", so it was absent from every install.
+linelist_generation = ["data/*.csv"]
+
 [tool.setuptools.packages.find]
 where = ["scripts"]
 include = ["linelist_generation*"]

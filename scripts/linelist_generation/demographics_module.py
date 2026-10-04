@@ -2,6 +2,46 @@ import pandas as pd
 import numpy as np
 import os
 
+# County FIPS table, shipped inside the package.
+_FIPS_CSV = "county_fips.csv"
+
+
+def county_fips_path() -> str:
+    """Absolute path to the bundled county FIPS table.
+
+    Resolved through importlib.resources rather than by walking up from
+    __file__. The old code did
+        os.path.join(script_dir, "../../Data/county_fips.csv")
+    which is the repo root in a checkout but `lib/pythonX.Y/Data/` once
+    installed, because the package installs as site-packages/
+    linelist_generation and the two `..` climb straight out of it. The table
+    was never packaged either, so every non-editable install raised
+    FileNotFoundError -- after loading the whole EpiHiper file.
+
+    Public so a caller can check for the table before doing expensive work.
+    """
+    try:
+        from importlib.resources import files
+
+        cand = files("linelist_generation") / "data" / _FIPS_CSV
+        if cand.is_file():
+            return str(cand)
+    except (ImportError, ModuleNotFoundError, TypeError, OSError):
+        pass        # not importable as a package: running the files directly
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    for rel in (("data", _FIPS_CSV),            # packaged location
+                ("..", "..", "Data", _FIPS_CSV)):   # pre-move checkout
+        cand = os.path.normpath(os.path.join(here, *rel))
+        if os.path.isfile(cand):
+            return cand
+
+    raise FileNotFoundError(
+        f"{_FIPS_CSV} not found. It ships inside the package at "
+        f"linelist_generation/data/{_FIPS_CSV}; if this is an old checkout, "
+        f"pull and reinstall TwinSampler.")
+
+
 class DemographicsLoader:
     """
     A centralized loader for EpiHiper/synthetic population demographic files.
@@ -19,11 +59,8 @@ class DemographicsLoader:
     def __init__(self, filepath, use_pyarrow=True, skiprows=0, county_lookup=False):
         self.filepath = filepath
         self.df = self._load_and_standardize(use_pyarrow, skiprows)
-        script_dir = os.path.dirname(os.path.abspath(__file__))
         if county_lookup:
-            # Construct the path relative to the script's directory
-            fips_csv_path = os.path.join(script_dir, "../../Data/county_fips.csv")
-            fips_csv_path = os.path.normpath(fips_csv_path)
+            fips_csv_path = county_fips_path()
             print(f"Loading FIPS mapping from {fips_csv_path}...")
             fips_mapping_df = pd.read_csv(fips_csv_path, dtype={'FIPS': str})
             self.fips_to_name_dict = dict(zip(fips_mapping_df['FIPS'], fips_mapping_df['county']))

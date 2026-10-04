@@ -562,7 +562,21 @@ def parse_args() -> argparse.Namespace:
 
 def main():
     args = parse_args()
-    
+
+    # Preflight the bundled county table. process_epihiper builds the
+    # DemographicsLoader only after reading and filtering the whole EpiHiper
+    # file, so a missing table used to surface as a traceback six minutes in.
+    # Two seconds here instead.
+    try:
+        from .demographics_module import county_fips_path
+    except ImportError:
+        from demographics_module import county_fips_path
+    try:
+        county_fips_path()
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
     try:
         prefix_list = json.loads(args.prefix_override)
     except (json.JSONDecodeError, ValueError) as e:
