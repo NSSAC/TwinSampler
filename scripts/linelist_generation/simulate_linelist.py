@@ -636,7 +636,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output_all_events", action='store_true', help="If set, also saves a compressed, formatted file of ALL potential events (pre-ascertainment).")
     p.add_argument("--seed", type=int, default=None, help="Base random seed for reproducibility.")
     p.add_argument("--n_seeds", type=int, default=1, help="Number of different seeds to generate linelists with.")
-    p.add_argument("--prefix_override", type=str, default='["A", "P", "I", "dm", "hM"]', help="A JSON-formatted string of exit_state prefixes to filter")
+    p.add_argument("--prefix_override", type=str, default='["A", "P", "I", "dM", "hM"]', help="A JSON-formatted string of exit_state prefixes to filter")
     p.add_argument("--target_variant", type=str, default=None, 
                    help="Filter all simulation events to a specific variant number (e.g., '2').")
     p.add_argument("--exposed_filter", type=str, default='["E"]', help="A JSON-formatted string of exit_state prefixes to filter")
