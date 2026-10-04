@@ -123,9 +123,7 @@ def resolve_county(df, fips_to_name):
                 print(f"  WARNING: {disagree:,} of {int(both.sum()):,} rows have a "
                       f"county name that disagrees with {source}:\n"
                       f"{sample.to_string(index=False)}")
-            else:
-                print(f"  county name and {source} agree on all "
-                      f"{int(both.sum()):,} checkable rows.")
+
 
     unmapped = int(df["county_fips"].notna().sum() - mapped.notna().sum())
     if unmapped:
@@ -226,8 +224,10 @@ def process_epihiper(
     ).drop(columns=['FIPS'], errors='ignore')
 
     n_rucc = int(decorated_df["rucc_code"].notna().sum())
-    print(f"Successfully decorated data with person, household, and RUCC info "
-          f"({n_rucc:,} of {len(decorated_df):,} rows matched a RUCC code).")
+    print("Successfully decorated data with person, household, and RUCC info.")
+    if 0 < n_rucc < len(decorated_df):
+        print(f"  WARNING: {len(decorated_df) - n_rucc:,} of "
+              f"{len(decorated_df):,} rows matched no RUCC code.")
     if n_rucc == 0:
         raise ValueError(
             "no row matched a RUCC code, so ascertainment_module would fall "

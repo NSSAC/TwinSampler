@@ -103,9 +103,9 @@ class DemographicsLoader:
     def _load_and_standardize(self, use_pyarrow, skiprows):
         """Loads the CSV and applies universal schema rules."""
         engine = "pyarrow" if use_pyarrow else "c"
+        # Silent: skipping a line that names identifiers is never right, so
+        # there is no judgement call to report.
         if skiprows and self._header_on_first_line(self.filepath):
-            print(f"  (line 1 of {os.path.basename(self.filepath)} is already a "
-                  f"header; ignoring skiprows={skiprows})")
             skiprows = 0
         try:
             df = pd.read_csv(self.filepath, engine=engine, skiprows=skiprows)
