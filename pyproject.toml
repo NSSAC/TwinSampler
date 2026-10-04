@@ -1,10 +1,11 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=69", "setuptools-scm>=8", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "twin-sampler"
-version = "0.1.0"
+# Derived from git by setuptools-scm; see [tool.setuptools_scm] below.
+dynamic = ["version"]
 description = "Synthetic epidemic ascertainment: turn ABM output into realistic public health line lists"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -32,6 +33,23 @@ simulate-linelist = "linelist_generation.simulate_linelist:main"
 twinsampler-label-components = "linelist_generation.label_components:main"
 # Legacy name, kept so existing pipelines and the PhyloGAS Snakefile keep working.
 simulate_linelist = "linelist_generation.simulate_linelist:main"
+
+[tool.setuptools_scm]
+# This package is installed from a git URL, never from a release, so a static
+# version actively misleads pip: `pip install --upgrade git+...@main` resolves
+# the URL, sees the version it already has, and no-ops. That is how a cluster
+# ran a TwinSampler without the geography flags for eight hours after they
+# were pushed, failing with argparse's "unrecognized arguments".
+#
+# Deriving the version from git makes every commit a distinct version, so
+# --upgrade has something to compare. REQUIRES AT LEAST ONE TAG: with no tags
+# setuptools-scm emits 0.1.devN+g<hash>, which PEP 440 orders *below* 0.1.0 --
+# pip would refuse it as a downgrade and the change would backfire. Past a
+# v0.1.0 tag it emits 0.1.1.devN+g<hash>, which sorts above.
+#
+# fallback_version covers a build with no git metadata (an unpacked sdist, or
+# a source copy without .git), where setuptools-scm would otherwise hard-fail.
+fallback_version = "0.1.0.dev0+unknown"
 
 [tool.setuptools]
 package-dir = { "" = "scripts" }
