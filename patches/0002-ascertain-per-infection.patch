@@ -1,0 +1,64 @@
+diff --git a/scripts/linelist_generation/simulate_linelist.py b/scripts/linelist_generation/simulate_linelist.py
+index 421979d..0e2da3c 100644
+--- a/scripts/linelist_generation/simulate_linelist.py
++++ b/scripts/linelist_generation/simulate_linelist.py
+@@ -580,24 +580,51 @@ def simulate(events_df: pd.DataFrame, params: dict, seed: int | None = None) ->
+     # 'symptom_severity' and 'ascertainment_prob' columns.
+ 
+ 
+-    ascertained_pids = set()
++    # Keyed on the INFECTION, not the person.
++    #
++    # This set used to hold event['pid'], so once somebody was detected they
++    # were excluded from detection for the rest of the run -- including for
++    # later, entirely separate infections. In this Delta wave 1,033,000 of
++    # 4,090,940 people (25.3%) have more than one infection, up to 6, with
++    # episodes 39 to 114 days apart. Each is a distinct alias_pid with its own
++    # `strain` and its own painted genome, so a quarter of the population was
++    # systematically under-ascertained -- and non-randomly, since being found
++    # early is exactly what disqualified you later.
++    #
++    # alias_pid ("{pid}.{exposure_tick}") is the infection id and is 1:1 with
++    # `strain`. Per-infection first-detection is what "Model B: First
++    # Ascertained Event" describes.
++    #
++    # alias_pid is populated by label_components.create_labels, which main()
++    # calls before process_epihiper, so it is present here. Checked rather
++    # than assumed: format_final_linelist silently adds any missing schema
++    # column as an empty string, so a reordering upstream would otherwise
++    # collapse every infection onto one key instead of erroring.
++    if "alias_pid" not in events_df.columns:
++        raise KeyError(
++            "simulate() needs 'alias_pid' to key first-detection per "
++            "infection; it is normally added by "
++            "label_components.create_labels before process_epihiper. "
++            f"Columns: {', '.join(map(str, events_df.columns[:14]))}")
++
++    ascertained_infections = set()
+     line_list_rows = []
+ 
+     print(f"Simulating ascertainment for {len(events_df)} potential events...")
+     # Iterate through the events in chronological order
+     for index, event in events_df.iterrows():
+-        pid = event['pid']
+-        
+-        # If this person has already been found, skip to the next event
+-        if pid in ascertained_pids:
++        infection_id = event['alias_pid']
++
++        # If this infection has already been found, skip to the next event
++        if infection_id in ascertained_infections:
+             continue
+-        
++
+         # Perform the Bernoulli trial for this event
+         prob = event['ascertainment_prob']
+         if rng.random() < prob:
+-            # Success! Add this event to our line list and track the PID
++            # Success! Add this event to our line list and track the infection
+             line_list_rows.append(event)
+-            ascertained_pids.add(pid)
++            ascertained_infections.add(infection_id)
+     
+     if not line_list_rows:
+         return pd.DataFrame()

@@ -580,24 +580,51 @@ def simulate(events_df: pd.DataFrame, params: dict, seed: int | None = None) -> 
     # 'symptom_severity' and 'ascertainment_prob' columns.
 
 
-    ascertained_pids = set()
+    # Keyed on the INFECTION, not the person.
+    #
+    # This set used to hold event['pid'], so once somebody was detected they
+    # were excluded from detection for the rest of the run -- including for
+    # later, entirely separate infections. In this Delta wave 1,033,000 of
+    # 4,090,940 people (25.3%) have more than one infection, up to 6, with
+    # episodes 39 to 114 days apart. Each is a distinct alias_pid with its own
+    # `strain` and its own painted genome, so a quarter of the population was
+    # systematically under-ascertained -- and non-randomly, since being found
+    # early is exactly what disqualified you later.
+    #
+    # alias_pid ("{pid}.{exposure_tick}") is the infection id and is 1:1 with
+    # `strain`. Per-infection first-detection is what "Model B: First
+    # Ascertained Event" describes.
+    #
+    # alias_pid is populated by label_components.create_labels, which main()
+    # calls before process_epihiper, so it is present here. Checked rather
+    # than assumed: format_final_linelist silently adds any missing schema
+    # column as an empty string, so a reordering upstream would otherwise
+    # collapse every infection onto one key instead of erroring.
+    if "alias_pid" not in events_df.columns:
+        raise KeyError(
+            "simulate() needs 'alias_pid' to key first-detection per "
+            "infection; it is normally added by "
+            "label_components.create_labels before process_epihiper. "
+            f"Columns: {', '.join(map(str, events_df.columns[:14]))}")
+
+    ascertained_infections = set()
     line_list_rows = []
 
     print(f"Simulating ascertainment for {len(events_df)} potential events...")
     # Iterate through the events in chronological order
     for index, event in events_df.iterrows():
-        pid = event['pid']
-        
-        # If this person has already been found, skip to the next event
-        if pid in ascertained_pids:
+        infection_id = event['alias_pid']
+
+        # If this infection has already been found, skip to the next event
+        if infection_id in ascertained_infections:
             continue
-        
+
         # Perform the Bernoulli trial for this event
         prob = event['ascertainment_prob']
         if rng.random() < prob:
-            # Success! Add this event to our line list and track the PID
+            # Success! Add this event to our line list and track the infection
             line_list_rows.append(event)
-            ascertained_pids.add(pid)
+            ascertained_infections.add(infection_id)
     
     if not line_list_rows:
         return pd.DataFrame()
@@ -837,9 +864,57 @@ def main():
             country=args.country, region=args.region,
             division=args.division, divisionAbbr=args.division_abbr,
         )
+        # One row per INFECTION, not per clinical state.
+        #
+        # preprocessed_events_df holds one row per ascertainable state, which
+        # is what `simulate` needs: it walks them in tick order running a
+        # Bernoulli trial per state until the person is first detected, so P,
+        # I and hM are three chances at rising probability. That frame is
+        # passed to `simulate` separately and is untouched here.
+        #
+        # The file, though, is read as an infection record. It was written
+        # one-row-per-state, which on a 36-week Delta wave meant 8,902,620
+        # rows for 5,295,971 infections -- 1.68x. Every consumer that counts
+        # rows therefore overcounted, and not uniformly: a person's P, I and
+        # hM fall on different ticks, so one infection landed in up to three
+        # different weeks. PhyloGAS's build_weekly_infections and
+        # build_weekly_variant_counts (the KL ground-truth denominators) and
+        # the all_infections Nextstrain arm all did exactly that.
+        #
+        # alias_pid is the infection id, 1:1 with `strain`; `sim_pid` is the
+        # person and is NOT unique -- 25% of people here have more than one
+        # infection, up to 6. So the key is alias_pid.
+        #
+        # The earliest state is kept, so `date` is the infection's first
+        # ascertainable event. `exposure_date` is unaffected either way.
+        n_rows = len(formatted_events_df)
+        if "alias_pid" in formatted_events_df.columns:
+            # format_final_linelist has already renamed tick -> sim_tick, so
+            # sort on that. Numeric, because a lexicographic sort puts tick
+            # 100 before tick 99 and would keep the wrong row.
+            if "sim_tick" in formatted_events_df.columns:
+                order = pd.to_numeric(formatted_events_df["sim_tick"],
+                                      errors="coerce")
+            else:
+                order = pd.to_datetime(formatted_events_df.get("date"),
+                                       errors="coerce")
+            formatted_events_df = (
+                formatted_events_df
+                .assign(_order=order)
+                .sort_values(["alias_pid", "_order"], kind="mergesort")
+                .drop_duplicates(subset=["alias_pid"], keep="first")
+                .drop(columns=["_order"]))
+        else:
+            print("  WARNING: no alias_pid column; writing one row per state. "
+                  "Consumers that count rows will overcount infections.")
         all_events_path = f"{base_output_path}_allevents.csv.xz"
         formatted_events_df.to_csv(all_events_path, index=False, compression='xz')
-        print(f"Wrote {len(formatted_events_df):,} potential event rows to {all_events_path}")
+        n_out = len(formatted_events_df)
+        print(f"Wrote {n_out:,} infection rows to {all_events_path}")
+        if n_out != n_rows:
+            print(f"  collapsed {n_rows:,} ascertainable-state rows to "
+                  f"{n_out:,} infections ({n_rows / n_out:.2f} states each); "
+                  f"the ascertainment model still sees all {n_rows:,}")
 
     base_seed = args.seed if args.seed is not None else 0
     seeds = [base_seed + i for i in range(args.n_seeds)]
