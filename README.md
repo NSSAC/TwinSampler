@@ -85,7 +85,7 @@ Given `--out results/linelist.csv`:
 | file | contents |
 |---|---|
 | `linelist.csv.xz` | **the observable record** — only ascertained cases |
-| `linelist_allevents.csv.xz` | **the ground truth** — every infection, with `--output_all_events` |
+| `linelist_allevents.csv.xz` | **the ground truth** — one row per infection, with `--output_all_events` |
 | `linelist_mugration.json` | true geographic transition matrix, for benchmarking |
 
 With `--n_seeds N`, line lists are suffixed `_seed0`, `_seed1`, … so one
@@ -96,6 +96,27 @@ reinfection-safe identifiers that make the transmission graph reconstructable
 — plus demographics, `ses_category`, `rucc_code`, `variant_label`,
 `component_id`, and the per-row `test_prob` that produced the ascertainment
 draw.
+
+#### Identifiers and dates
+
+| column | meaning |
+|---|---|
+| `alias_pid` | the **infection** id, `"{pid}.{exposure_tick}"`. 1:1 with `strain` downstream. A person infected twice has two. |
+| `alias_contact` | the infector's infection id |
+| `sim_pid` | the **person** in the synthetic population |
+| `sim_tick`, `date` | onset of the clinical state that row records (the earliest one, in `allevents`) |
+| `exposure_tick`, `exposure_date` | when the infection was acquired |
+
+`date` is an **onset** date, not a collection or report date: no reporting
+delay is modelled. Downstream tools that treat it as a sampling date are off
+by the specimen-to-report lag a real system would add.
+
+`allevents` holds one row per infection — the earliest ascertainable state
+(A/P/I/dM/hM by default) — restricted to infections whose state onset falls in
+`--start_tick`…`--stop_tick`. Earlier releases wrote one row per state
+(about 1.7 rows per infection); consumers that counted rows as infections
+over-counted. Regenerate older `allevents` files, or de-duplicate on
+`alias_pid`.
 
 ---
 
@@ -116,9 +137,12 @@ Every value in `ascertainment_parameters.yaml` is sourced to the COVID-19
 epidemiological literature, with inline citations. Edit that file to model a
 different surveillance regime; nothing is hard-coded.
 
-The model evaluates states **chronologically** and records the *first*
-ascertained event, so someone detected while presymptomatic is not
-double-counted when they later become severe.
+The model evaluates each infection's states **chronologically** and records
+the *first* ascertained event, so someone detected while presymptomatic is not
+double-counted when they later become severe. Detection is keyed on the
+infection (`alias_pid`), not the person: a reinfection is a new chance to be
+detected. (Releases before this fix keyed on `pid`, which silently dropped
+every reinfection after a person's first detection.)
 
 ---
 
