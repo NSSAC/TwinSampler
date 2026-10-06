@@ -13,7 +13,7 @@ Usage:
       --people va_persontrait_epihiper.txt \
       --infection run_03_vadelta_rate_limited_ticks.metadata.fixed_dates.tsv \
       --households va_household.csv \
-      --rucc Ruralurbancontinuumcodes2023.csv \
+      [--rucc Ruralurbancontinuumcodes2023.csv]   # default: bundled 2023 table
       --out simulated_test_positive_linelist.csv \
 """
 
@@ -21,9 +21,10 @@ from __future__ import annotations
 import argparse
 import numpy as np
 import pandas as pd
+import os
 import sys
 import json
-from rucc_utils import load_and_pivot_rucc
+from rucc_utils import load_and_pivot_rucc, bundled_rucc_path
 from testing_prob import compute_testing_probability
 from demographics_module import DemographicsLoader
 from ascertainment_module import (
@@ -657,7 +658,9 @@ def parse_args() -> argparse.Namespace:
                         "The old modes still work here if you need them standalone.")
     p.add_argument("--people", required=True, dest="persontrait_file", help="Path to va_persontrait_epihiper.txt.")
     p.add_argument("--households", required=True, help="Path to va_household.csv.")
-    p.add_argument("--rucc", required=True, help="Path to Ruralurbancontinuumcodes2023.csv.")
+    p.add_argument("--rucc", default=None,
+                   help="USDA rural-urban continuum codes CSV (long format). "
+                        "Default: the 2023 table bundled with TwinSampler.")
     p.add_argument("--ascertain", required=True, help="Path to ascertainment_parameters.yaml file.")
     p.add_argument("--out", default="simulated_test_positive_linelist.csv", help="Output CSV path.")
     p.add_argument("--output_all_events", action='store_true', help="If set, also saves a compressed, formatted file of ALL potential events (pre-ascertainment).")
@@ -715,9 +718,15 @@ def main():
         from demographics_module import county_fips_path
     try:
         county_fips_path()
+        if args.rucc is None:
+            args.rucc = bundled_rucc_path()
     except FileNotFoundError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
+    if not os.path.isfile(args.rucc):
+        print(f"Error: --rucc {args.rucc} does not exist.", file=sys.stderr)
+        sys.exit(1)
+    print(f"RUCC table: {args.rucc}")
 
     try:
         prefix_list = json.loads(args.prefix_override)

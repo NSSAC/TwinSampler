@@ -43,7 +43,6 @@ simulate-linelist \
     --epihiper   output.csv.gz \
     --people     va_persontrait_epihiper.txt \
     --households va_household.csv \
-    --rucc       Ruralurbancontinuumcodes2023.csv \
     --ascertain  scripts/linelist_generation/ascertainment_parameters.yaml \
     --start_date 2021-04-07 \
     --start_tick 128 \
@@ -62,13 +61,13 @@ simulate-linelist \
 | `--epihiper` | raw ABM event log: `tick,pid,exit_state,contact_pid,location_id` |
 | `--people` | synthetic population persontrait file |
 | `--households` | household table, linking people to residences |
-| `--rucc` | USDA rural-urban continuum codes, for the geography modifier |
 | `--ascertain` | YAML defining the detection-probability model |
 
 ### Common options
 
 | flag | effect |
 |---|---|
+| `--rucc` | USDA rural-urban continuum codes for the geography modifier; defaults to the bundled 2023 table (`linelist_generation/data/`) |
 | `--start_tick` / `--stop_tick` | restrict to a tick window |
 | `--start_date` | calendar date corresponding to `--start_tick` |
 | `--output_all_events` | also write the full transmission graph (needed for benchmarking) |

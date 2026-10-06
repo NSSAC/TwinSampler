@@ -5,7 +5,39 @@ Utilities for reading and reshaping USDA RUCC lookup data.
 """
 
 from __future__ import annotations
+import os
 import pandas as pd
+
+# USDA ERS 2023 rural-urban continuum codes, shipped inside the package so
+# --rucc is optional. Public domain (17 U.S.C. 105); provenance in
+# data/README.md next to the file.
+RUCC_FILENAME = "Ruralurbancontinuumcodes2023.csv"
+
+
+def bundled_rucc_path() -> str:
+    """Absolute path to the bundled RUCC table.
+
+    Same resolution as demographics_module.county_fips_path(): through
+    importlib.resources when installed, then beside this file for a checkout
+    run as plain scripts.
+    """
+    try:
+        from importlib.resources import files
+
+        cand = files("linelist_generation") / "data" / RUCC_FILENAME
+        if cand.is_file():
+            return str(cand)
+    except (ImportError, ModuleNotFoundError, TypeError, OSError):
+        pass        # not importable as a package: running the files directly
+
+    cand = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "data", RUCC_FILENAME)
+    if os.path.isfile(cand):
+        return cand
+    raise FileNotFoundError(
+        f"{RUCC_FILENAME} not found. It ships inside the package at "
+        f"linelist_generation/data/{RUCC_FILENAME}; pull and reinstall "
+        f"TwinSampler, or pass --rucc.")
 
 
 def load_and_pivot_rucc(rucc_path: str, encoding: str = "latin1") -> pd.DataFrame:
